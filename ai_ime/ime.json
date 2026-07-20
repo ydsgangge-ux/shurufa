@@ -1,0 +1,14 @@
+{
+    "name": "AI输入法",
+    "version": "0.1.0",
+    "guid": "{1FC8E29E-09F2-4E3E-A414-8FF3D4EFE3DD}",
+    "locale": "zh-CN",
+    "fallbackLocale": "zh-CN",
+    "icon": "",
+    "win8_icon": "",
+    "moduleName": "ai_ime_ime",
+    "serviceName": "AIIMEService",
+    "configTool": "",
+    "configToolParams": "",
+    "configToolDir": ""
+}

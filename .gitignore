@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# User data
+ai_ime/data/user_memory.json
+
+# Backups
+*.bak
+backups/
+
+# IDE
+.vscode/
+.idea/
+
+# Temp
+*.tmp
+*.temp

@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-07-17T19:51:33.028123",
+  "windows_version": "win32",
+  "pime_installed": false,
+  "pime_path": null,
+  "ime_deployed": false,
+  "ime_info": {},
+  "launcher_running": false,
+  "key_log": {
+    "log_file": "C:\\Users\\mon37\\AppData\\Local\\PIME\\Log\\ai_ime_debug.log",
+    "exists": false,
+    "lines": 0
+  },
+  "overall": "INCOMPLETE"
+}
