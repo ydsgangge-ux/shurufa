@@ -69,7 +69,7 @@ class UserMemory:
         """添加用户造词
 
         如果该词已存在，增加词频；否则新增。
-        返回更新后的词频。
+        初始词频设为较高值，确保一次造词就能排在前面。
 
         Args:
             pinyin: 空格分隔拼音（如 "song huo dan"）
@@ -79,12 +79,13 @@ class UserMemory:
             return 0
         for entry in self._phrases:
             if entry["pinyin"] == pinyin and entry["word"] == word:
-                entry["freq"] += 100
+                entry["freq"] += 500
                 self._save()
                 return entry["freq"]
-        self._phrases.append({"pinyin": pinyin, "word": word, "freq": 100})
+        # 新造词：给一个高词频，确保排第一
+        self._phrases.append({"pinyin": pinyin, "word": word, "freq": 9999})
         self._save()
-        return 100
+        return 9999
 
     def get_phrases(self):
         """返回所有用户造词列表"""
