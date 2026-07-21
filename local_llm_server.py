@@ -4,10 +4,15 @@
 用系统的 Python + llama-cpp-python 运行，
 PIME 输入法通过 HTTP 调用。
 
-优势：
-- 无需 Ollama 进程
-- 比 Ollama HTTP 少一层进程间通信
-- 模型常驻内存，推理速度快
+推荐模型：
+- qwen2.5-0.5b-instruct-q4_k_m.gguf（400MB，输入法专用）
+- qwen3-0.6b-q4_k_m.gguf（同样小巧）
+
+模型要求：
+1. 必须是 .gguf 格式
+2. 必须是 Instruct/Chat 微调版（base 模型不会按格式回复）
+3. 建议 ≤1B 参数（大了推理太慢，输入法等不了）
+4. 必须支持中文
 
 启动方式：
   python local_llm_server.py [--port 11435] [--model path/to/model.gguf]
@@ -27,8 +32,73 @@ API（兼容 Ollama 格式）：
 """
 
 import json
+import os
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+
+# 推荐模型关键词（用于自动选择最佳模型）
+PREFERRED_KEYWORDS = ["qwen", "instruct"]
+# 不推荐的模型关键词（base 模型不会按 chat 格式回复）
+BASE_MODEL_KEYWORDS = ["base", "pretrained", "continuation"]
+
+
+def _pick_best_model(models_dir):
+    """从 models/ 目录中选择最佳模型
+
+    优先级：
+    1. 包含 qwen + instruct 的模型
+    2. 包含 instruct/chat 的模型
+    3. 第一个 .gguf 文件（带警告）
+    """
+    if not os.path.isdir(models_dir):
+        return None, ""
+
+    gguf_files = [f for f in os.listdir(models_dir) if f.endswith(".gguf")]
+    if not gguf_files:
+        return None, ""
+
+    # 优先选择含 qwen+instruct 的
+    best = None
+    best_score = 0
+    warnings = []
+
+    for f in gguf_files:
+        name_lower = f.lower()
+        score = 0
+
+        # 加分项
+        if "qwen" in name_lower:
+            score += 10
+        if "instruct" in name_lower or "chat" in name_lower or "it" in name_lower:
+            score += 5
+        if "0.5b" in name_lower or "0.6b" in name_lower or "1b" in name_lower:
+            score += 3  # 小模型更适合输入法
+        if "q4" in name_lower or "q5" in name_lower:
+            score += 1  # 量化格式合理
+
+        # 警告项
+        if any(kw in name_lower for kw in BASE_MODEL_KEYWORDS):
+            score -= 20
+            warnings.append("[WARN] {} 可能是 base 模型（非指令微调），无法按 chat 格式回复".format(f))
+        if any(kw in name_lower for kw in ["7b", "8b", "13b", "14b", "32b", "70b"]):
+            warnings.append("[WARN] {} 参数量较大，推理可能较慢（建议 ≤1B）".format(f))
+            score -= 5
+        if "q2" in name_lower or "q1" in name_lower:
+            warnings.append("[WARN] {} 量化太低，输出质量差".format(f))
+
+        if score > best_score:
+            best_score = score
+            best = f
+
+    if best and gguf_files.index(best) > 0:
+        print("[INFO] 发现多个模型，已自动选择: {} (score={})".format(best, best_score))
+
+    for w in warnings:
+        if best and any(kw in best.lower() for kw in ["base", "7b", "8b", "13b", "q2", "q1"]):
+            print(w)
+
+    return os.path.join(models_dir, best) if best else None, "".join(warnings)
 
 
 class LLMHandler(BaseHTTPRequestHandler):
@@ -63,13 +133,27 @@ class LLMHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_error(str(e))
         elif self.path == "/api/health":
-            self._send_json({"status": "ok", "model_loaded": self.llm is not None})
+            model_name = ""
+            if self.llm and hasattr(self.llm, 'model_path'):
+                model_name = os.path.basename(self.llm.model_path)
+            self._send_json({
+                "status": "ok",
+                "model_loaded": self.llm is not None,
+                "model": model_name,
+            })
         else:
             self._send_error("Unknown endpoint", 404)
 
     def do_GET(self):
         if self.path == "/api/health":
-            self._send_json({"status": "ok", "model_loaded": self.llm is not None})
+            model_name = ""
+            if self.llm and hasattr(self.llm, 'model_path'):
+                model_name = os.path.basename(self.llm.model_path)
+            self._send_json({
+                "status": "ok",
+                "model_loaded": self.llm is not None,
+                "model": model_name,
+            })
         else:
             self._send_error("Unknown endpoint", 404)
 
@@ -99,18 +183,15 @@ def main():
     # 查找模型
     model_path = args.model
     if not model_path:
-        import os
         script_dir = os.path.dirname(os.path.abspath(__file__))
         models_dir = os.path.join(script_dir, "models")
-        if os.path.isdir(models_dir):
-            for f in os.listdir(models_dir):
-                if f.endswith(".gguf"):
-                    model_path = os.path.join(models_dir, f)
-                    break
+        model_path, warning = _pick_best_model(models_dir)
 
     if not model_path or not os.path.isfile(model_path):
         print("[ERROR] No .gguf model found")
-        print("  Usage: python local_llm_server.py --model path/to/model.gguf")
+        print("  Put a model in the models/ directory, then retry.")
+        print("  Recommended: qwen2.5-0.5b-instruct-q4_k_m.gguf")
+        print("  Download: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF")
         return
 
     # 加载模型
@@ -122,6 +203,8 @@ def main():
         n_threads=args.threads,
         verbose=False,
     )
+    # 保存模型路径供 health API 使用
+    LLMHandler.llm.model_path = model_path
     print("Model loaded. Starting server on port {}".format(args.port))
 
     # 启动 HTTP 服务

@@ -64,6 +64,23 @@ mkdir "$env:USERPROFILE\.ai_ime"
 
 需要系统 Python 3.10+ 和 llama-cpp-python（安装脚本会自动安装）。
 
+**模型要求：**
+
+| 要求 | 说明 |
+|------|------|
+| 格式 | `.gguf` |
+| 微调类型 | 必须是 **Instruct/Chat** 版（base 模型无法按 chat 格式回复） |
+| 参数量 | 建议 **≤1B**（0.5B/0.6B 最佳，7B+ 推理太慢） |
+| 语言 | 必须支持**中文** |
+| 量化 | Q4_K_M 或 Q5_K_M（Q2 太差，Q8 没必要） |
+
+**推荐模型：**
+- `qwen2.5-0.5b-instruct-q4_k_m.gguf`（默认，400MB）
+- `qwen3-0.6b-instruct-q4_k_m.gguf`
+- `tinyllama-1.1b-chat-q4_k_m.gguf`
+
+放到 `models/` 目录即可，多个模型时自动选择最佳。
+
 ## 使用方法
 
 | 操作 | 说明 |
