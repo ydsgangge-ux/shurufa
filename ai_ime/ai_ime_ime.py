@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-AI 输入法 v0.9 - 搜狗式交互流程
+AI 输入法 v1.0 - AI 语义推断
 
 核心交互（模仿搜狗输入法）：
-1. 输入拼音 → 先展示完整句子候选（多种整句解释）
-2. 空格选第一个候选，数字键1-9选对应候选
-3. 翻页 = 看更多整句候选
-4. 翻到底 → 自动进入分词模式（一个词一个词确认）
-5. 分词模式中，翻到底 → 拆分成更小词/单字（保底）
+1. 输入拼音 → 先展示词库候选
+2. AI 异步推断 → 候选追加到末尾（歇后语/古诗文/成语接龙等）
+3. 词库无候选时 → AI 兜底生成
+4. 翻页 = 看更多候选
+5. 翻到底 → 进入分词模式（一个词一个词确认）
 6. 回车 → 上屏原始拼音字母
 7. ESC → 取消
 
@@ -34,6 +34,8 @@ from pinyin.dict_loader import DictLoader
 from pinyin.candidates import get_candidates as get_pinyin_candidates, get_segments, generate_interpretations
 from pinyin.parser import best_split
 from user_memory import UserMemory
+from ai.predictor import get_predictor
+from ai.lexicon_expander import LexiconExpander
 
 # 虚拟键码
 VK_BACK = 0x08
@@ -68,6 +70,7 @@ class AIIMEService(TextService):
 
     _dict_loader = None
     _user_memory = None
+    _lexicon_expander = None
 
     def __init__(self, client):
         super().__init__(client)
@@ -88,6 +91,13 @@ class AIIMEService(TextService):
         # Shift 键状态
         self._shift_pressed = False
         self._shift_key_down_time = None
+        # 引号配对状态
+        self._double_quote_open = False  # False=下次输出"（左），True=下次输出"（右）
+        self._single_quote_open = False  # False=下次输出'（左），True=下次输出'（右）
+        # AI 预测器（"抢空闲"模式：上屏后预测下一个词）
+        self._ai_predictor = get_predictor()
+        self._ai_suggestions = []  # AI 预缓存的建议词（上屏后计算好的）
+        self._ai_appended = False  # AI 结果是否已追加到候选
         # 加载词库和用户词频
         if AIIMEService._dict_loader is None:
             loader = DictLoader()
@@ -103,6 +113,11 @@ class AIIMEService(TextService):
             for entry in AIIMEService._user_memory.get_phrases():
                 AIIMEService._dict_loader.add_entry(
                     entry["pinyin"], entry["word"], entry["freq"])
+        # 初始化词库扩充器
+        if AIIMEService._lexicon_expander is None:
+            AIIMEService._lexicon_expander = LexiconExpander(
+                config.USER_MEMORY_PATH, AIIMEService._dict_loader)
+            debug_log("LexiconExpander initialized")
         debug_log("AIIMEService.__init__ called")
 
     def onActivate(self):
@@ -139,7 +154,7 @@ class AIIMEService(TextService):
         if self.composition:
             if code in (VK_SPACE, VK_RETURN, VK_BACK, VK_ESCAPE):
                 return True
-            if 0x31 <= code <= 0x39:
+            if 0x30 <= code <= 0x39:  # 0-9
                 return True
             if code in (config.VK_OEM_MINUS, config.VK_OEM_PLUS):
                 return True
@@ -150,17 +165,27 @@ class AIIMEService(TextService):
                 return True
             return True
 
-        # 中文标点
+        # 中文标点（用 charCode 匹配）
         if not self.composition and char_code > 0:
             char = chr(char_code)
             if char in config.PUNCTUATION_MAP:
                 return True
+            # 引号配对
+            if char in config.QUOTE_PAIRS:
+                return True
+
+        # 引号（keyCode 兜底，VK_OEM_7 = Shift+'）
+        if not self.composition and code in config.QUOTE_VK_MAP:
+            return True
 
         return False
 
     def onKeyDown(self, keyEvent):
         code = keyEvent.keyCode
         char_code = keyEvent.charCode
+
+        # 轮询 AI 结果（主线程，线程安全）
+        self._poll_ai_and_refresh()
 
         debug_log("onKeyDown keyCode=0x{:02X} charCode=0x{:02X} comp='{}' seg_mode={} seg_idx={}".format(
             code, char_code, self.composition, self._seg_mode, self._seg_idx))
@@ -222,6 +247,20 @@ class AIIMEService(TextService):
                 if self._seg_page > 0:
                     self._seg_page -= 1
                     self._render_seg_candidates()
+                elif self._seg_idx > 0:
+                    # 不是第一段 → 回到上一段
+                    pass  # 暂不实现回退段
+                else:
+                    # 分词模式第一页按 - → 退回整句候选模式
+                    debug_log("Seg mode - : return to whole sentence mode")
+                    self._seg_mode = False
+                    self._seg_idx = 0
+                    self._seg_committed = []
+                    self._seg_page = 0
+                    self._page = 0  # 回到整句第一页
+                    self.setCompositionString(self.composition)
+                    self.setCompositionCursor(len(self.composition))
+                    self._render_candidates()
             else:
                 if self._page > 0:
                     self._page -= 1
@@ -288,11 +327,42 @@ class AIIMEService(TextService):
                     self._seg_confirm_word(page_cands[idx])
                 return True
             else:
-                page_items = self._current_page_items()
-                if idx < len(page_items):
-                    self._commit_word(page_items[idx])
-                    return True
-                return False
+                # 有 AI 预测时，1=AI预测，2-9=词库第1-8位，0=词库第9位
+                ai_word = self._get_ai_prediction()
+                if ai_word:
+                    if idx == 0:
+                        # 按1 → 选择 AI 预测词
+                        self._commit_word(ai_word)
+                        debug_log("1 key: AI predict commit '{}'".format(ai_word))
+                        return True
+                    else:
+                        # 按2-9 → 选择词库第1-8位
+                        page_items = self._current_page_items()
+                        word_idx = idx - 1  # 偏移1位（因为1被AI占了）
+                        if word_idx < len(page_items):
+                            self._commit_word(page_items[word_idx])
+                            return True
+                        return False
+                else:
+                    # 无 AI 预测，1-9 直接选词库第1-9位
+                    page_items = self._current_page_items()
+                    if idx < len(page_items):
+                        self._commit_word(page_items[idx])
+                        return True
+                    return False
+
+        # 数字键 0：有AI预测时选词库第9位，无AI预测时忽略
+        if code == 0x30:
+            if self.composition and not self._seg_mode:
+                ai_word = self._get_ai_prediction()
+                if ai_word:
+                    # 有AI预测时，0=词库第9位
+                    page_items = self._current_page_items()
+                    if len(page_items) >= 9:
+                        self._commit_word(page_items[8])
+                        debug_log("0 key: dict word[8]='{}'".format(page_items[8]))
+                # 无AI预测时0键无效（SEL_KEYS_NO_AI 不包含0）
+            return True
 
         # 字母键 A-Z：追加到组合串
         if 0x41 <= code <= 0x5A:
@@ -320,6 +390,14 @@ class AIIMEService(TextService):
                 debug_log("punct {} -> {}".format(char, full))
                 self.setCommitString(full)
                 return True
+            # 引号配对
+            if char in config.QUOTE_PAIRS:
+                return self._handle_quote(char)
+
+        # 引号（keyCode 兜底）
+        if not self.composition and code in config.QUOTE_VK_MAP:
+            quote_char = config.QUOTE_VK_MAP[code]
+            return self._handle_quote(quote_char)
 
         return False
 
@@ -369,18 +447,19 @@ class AIIMEService(TextService):
         return self._all_candidates[start:start + config.PAGE_SIZE]
 
     def _update_composition_display(self):
-        """组合串变化时：先显示整句候选，翻到底再进分词模式
+        """组合串变化时：先显示词库候选 + 预缓存的 AI 建议
 
-        搜狗式流程：
-        1. 生成多种整句解释 → 作为候选列表
-        2. 用户翻页看更多整句
-        3. 翻到底 → 进入分词模式
+        【"抢空闲"设计】AI 不追打字节奏，而是：
+        1. 上屏后 → AI 利用词间停顿提前算好"下一个词"
+        2. 用户开始打字时 → 直接消费预缓存结果
+        3. 如果 AI 还没算完 → 每次按键轮询一次，算完就追加
         """
         self.setCompositionString(self.composition)
         self.setCompositionCursor(len(self.composition))
 
         # 重置分词模式状态
         self._seg_mode = False
+        self._ai_appended = False
 
         # 生成整句候选（多种解释）
         interpretations = generate_interpretations(
@@ -409,12 +488,118 @@ class AIIMEService(TextService):
         self._all_candidates = [word for word, freq in all_results]
         self._page = 0
 
+        # 特殊符号匹配（输入拼音匹配特殊符号，如 sheshidu → ℃）
+        if self.composition in config.SYMBOL_MAP:
+            for sym, desc in config.SYMBOL_MAP[self.composition]:
+                if sym not in seen:
+                    self._all_candidates.append(sym)
+                    seen.add(sym)
+
+        # 也匹配完整拼音中最后一个音节
+        syllables = best_split(self.composition)
+        if syllables and syllables[-1] in config.SYMBOL_MAP:
+            for sym, desc in config.SYMBOL_MAP[syllables[-1]]:
+                if sym not in seen:
+                    self._all_candidates.append(sym)
+                    seen.add(sym)
+
         # 如果有2+音节，记住可以进分词模式（翻到底时触发）
         self._can_enter_seg_mode = len(self._all_candidates) > 0 and len(self.composition) >= 2
 
-        debug_log("_update_composition_display comp='{}' cands={} seg_ready={}".format(
-            self.composition, len(self._all_candidates), self._can_enter_seg_mode))
+        # 【关键】消费预缓存的 AI 建议（上屏后提前算好的）
+        if self._ai_suggestions and not self._ai_appended:
+            added = []
+            for w in self._ai_suggestions:
+                if w not in seen and w != self.composition:
+                    self._all_candidates.append(w)
+                    seen.add(w)
+                    added.append(w)
+            if added:
+                self._ai_appended = True
+                debug_log("AI pre-cached used: '{}'".format("','".join(added)))
+
+        # 轮询：如果 AI 还在算，检查一下是否完成了
+        self._poll_ai_and_refresh()
+
+        debug_log("_update_composition_display comp='{}' cands={} seg_ready={} ai_cached={}".format(
+            self.composition, len(self._all_candidates), self._can_enter_seg_mode,
+            len(self._ai_suggestions)))
+
+        # 显示候选
         self._render_candidates()
+
+    def _request_ai_predict(self):
+        """发起异步 AI 请求
+
+        决策逻辑（优先级从高到低）：
+        1. 词库候选 ≤ 1 个 → 整句预测 + 兜底生成
+        2. 拼音 ≥ 6 字母（长句）→ 整句预测（最有价值场景）
+        3. 有上下文 → 上下文续写
+        """
+        if len(self.composition) < 4:
+            return
+
+        has_cloud = self._ai_predictor.cloud.is_available()
+
+        if len(self._all_candidates) <= 1:
+            # 词库无结果或极少
+            if has_cloud:
+                debug_log("AI sentence+fallback: comp='{}' cands={}".format(
+                    self.composition, len(self._all_candidates)))
+                self._ai_predictor.request_sentence_predict(
+                    self.composition, n=3)
+            else:
+                debug_log("AI fallback (local): comp='{}' cands={}".format(
+                    self.composition, len(self._all_candidates)))
+                self._ai_predictor.request_fallback_predict(
+                    self.composition, n=3)
+
+        elif has_cloud and len(self.composition) >= 6:
+            # 长句输入 → 云端整句预测（最有价值场景）
+            debug_log("AI sentence predict: comp='{}' cands={}".format(
+                self.composition, len(self._all_candidates)))
+            self._ai_predictor.request_sentence_predict(
+                self.composition, n=3)
+
+        else:
+            # 有上下文 → 续写
+            context = self._ai_predictor.get_context()
+            if context:
+                debug_log("AI context predict: comp='{}' ctx='{}'".format(
+                    self.composition, context[-20:]))
+                self._ai_predictor.request_context_predict(
+                    self.composition, n=3)
+
+    def _poll_ai_and_refresh(self):
+        """轮询 AI 结果
+
+        两种消费方式：
+        1. 如果正在打字（有 composition）→ 追加到候选末尾并刷新
+        2. 如果没在打字（上屏后空闲期）→ 缓存到 _ai_suggestions，下次打字时用
+        """
+        ai_words = self._ai_predictor.poll_ai_results()
+        if not ai_words:
+            return
+
+        if self.composition:
+            # 正在打字 → 直接追加到候选
+            if self._ai_appended:
+                return
+            seen = set(self._all_candidates)
+            added = []
+            for w in ai_words:
+                if w not in seen and w != self.composition:
+                    self._all_candidates.append(w)
+                    seen.add(w)
+                    added.append(w)
+            if added:
+                self._ai_appended = True
+                debug_log("AI appended: '{}'".format("','".join(added)))
+                self._render_candidates()
+        else:
+            # 空闲期 → 缓存结果，下次打字时用
+            self._ai_suggestions = ai_words
+            debug_log("AI pre-cached: '{}'".format("','".join(ai_words)))
 
     def _enter_seg_mode(self, segments):
         """进入分段确认模式"""
@@ -641,10 +826,26 @@ class AIIMEService(TextService):
                         full_pinyin, full_text, freq))
 
             self.setCommitString(full_text)
+
+            # 更新 AI 上下文 + 上屏后触发 AI 预测
+            old_ctx = self._ai_predictor.get_context()
+            new_ctx = old_ctx + full_text
+            self._ai_predictor.set_context(new_ctx)
+            self._ai_suggestions = []
+            self._ai_predictor.cancel_request()
+            if len(new_ctx) >= 2:
+                debug_log("AI predict-next: after seg commit '{}', ctx='{}'".format(
+                    full_text, new_ctx[-20:]))
+                self._ai_predictor.request_context_predict("", n=3)
+
             self.setShowCandidates(False)
             self.composition = ""
             self.setCompositionString("")
             self._reset_seg_state()
+
+            # 词库自动扩充：累积上屏文字
+            if AIIMEService._lexicon_expander and len(full_text) >= 2:
+                AIIMEService._lexicon_expander.accumulate(full_text)
         else:
             # 还有段未确认，更新显示
             self._render_seg_display()
@@ -709,13 +910,53 @@ class AIIMEService(TextService):
         self._render_seg_candidates()
 
     def _render_candidates(self):
+        """渲染候选列表，AI预测词插到第1位
+
+        候选窗布局（有AI预测时）：
+        1.✦AI预测  2.词库词  3.词库词 ... 9.词库词  0.词库词
+
+        无AI预测时：
+        1.词库词  2.词库词 ... 9.词库词
+        """
         page_items = self._current_page_items()
-        if page_items:
-            self.setCandidateList(page_items)
-            self.setShowCandidates(True)
-            self.setSelKeys(config.SEL_KEYS)
-        else:
+        if not page_items:
             self.setShowCandidates(False)
+            return
+
+        # AI 预测词插到第1位
+        ai_word = self._get_ai_prediction()
+        if ai_word:
+            # 前缀 ✦ 标识 AI 预测，与词库候选区分
+            ai_display = "\u2726{}".format(ai_word)
+            # 候选列表：AI预测在最前面 + 词库候选
+            display_items = [ai_display] + list(page_items)
+            self.setCandidateList(display_items)
+            self.setSelKeys(config.SEL_KEYS)
+            debug_log("candidates: AI[1]='{}' + {} items".format(ai_word, len(page_items)))
+        else:
+            self.setCandidateList(page_items)
+            self.setSelKeys(config.SEL_KEYS_NO_AI)
+
+        self.setShowCandidates(True)
+
+    def _get_ai_prediction(self):
+        """获取 AI 预测的下一个词（0位显示用）
+
+        优先级：
+        1. 已缓存的 AI 预测（上屏后提前算好的）
+        2. 轮询 AI 是否有新结果
+        """
+        # 1. 已缓存
+        if self._ai_suggestions:
+            return self._ai_suggestions[0]
+
+        # 2. 轮询
+        ai_words = self._ai_predictor.poll_ai_results()
+        if ai_words:
+            self._ai_suggestions = ai_words
+            return ai_words[0]
+
+        return None
 
     def _commit_word(self, word):
         """普通模式提交词"""
@@ -734,10 +975,57 @@ class AIIMEService(TextService):
                     pinyin_key, word, freq))
 
         self.setCommitString(word)
+
+        # 更新 AI 上下文（累积历史，保留最近 100 字）
+        old_ctx = self._ai_predictor.get_context()
+        new_ctx = old_ctx + word
+        self._ai_predictor.set_context(new_ctx)
+
+        # 【关键改动】上屏后立即触发 AI 预测下一个词
+        # 利用词间停顿（通常 0.5-2s）提前算好，下次打字时直接用
+        self._ai_suggestions = []  # 清空旧建议
+        self._ai_predictor.cancel_request()  # 取消旧请求
+        if len(new_ctx) >= 2:
+            debug_log("AI predict-next: after commit '{}', ctx='{}'".format(
+                word, new_ctx[-20:]))
+            self._ai_predictor.request_context_predict("", n=3)
+
         self.setShowCandidates(False)
         self.composition = ""
         self.setCompositionString("")
         self._reset_seg_state()
+
+        # 词库自动扩充：累积上屏文字
+        if AIIMEService._lexicon_expander and len(word) >= 2:
+            AIIMEService._lexicon_expander.accumulate(word)
+
+    def _handle_quote(self, char):
+        """处理引号配对逻辑
+
+        奇数次按 → 左引号（开），偶数次按 → 右引号（关）
+        " → " → " → " → ...
+        ' → ' → ' → ' → ...
+        """
+        left, right = config.QUOTE_PAIRS[char]
+        if char == "\"":
+            if not self._double_quote_open:
+                self.setCommitString(left)
+                self._double_quote_open = True
+                debug_log("quote: left double \"")
+            else:
+                self.setCommitString(right)
+                self._double_quote_open = False
+                debug_log("quote: right double \"")
+        elif char == "'":
+            if not self._single_quote_open:
+                self.setCommitString(left)
+                self._single_quote_open = True
+                debug_log("quote: left single '")
+            else:
+                self.setCommitString(right)
+                self._single_quote_open = False
+                debug_log("quote: right single '")
+        return True
 
     def _clear_composition(self):
         debug_log("_clear_composition")
