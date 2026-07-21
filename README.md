@@ -15,9 +15,21 @@
 
 ## 快速安装
 
-### 前提条件
+### 方式一：安装包（推荐）
 
-- Windows 10/11
+1. 前往 [Releases](https://github.com/你的用户名/ai-ime/releases) 下载最新版 `AI输入法_Setup_vX.X.X.exe`
+2. 双击运行，按提示安装
+3. 安装完成后，在任意应用中按 `Win+空格` 切换到「AI输入法」
+
+安装包已包含：
+- PIME 框架（自动下载安装）
+- 输入法全部文件 + 词库
+- AI 模型（可选勾选）
+- Python 依赖（自动安装）
+
+### 方式二：从源码安装
+
+**前提条件：** Windows 10/11
 - **PIME 框架**（安装脚本会自动下载，也可[手动安装](https://github.com/EasyIME/PIME/releases)）
 
 ### 安装步骤
@@ -148,6 +160,19 @@ download_model.ps1         # 下载 AI 模型
 ```
 
 日志位置：`%LOCALAPPDATA%\PIME\Log\ai_ime_debug.log`
+
+### 构建安装包
+
+```powershell
+# 1. 先把模型放到 models/ 目录（可选）
+# 2. 运行构建脚本
+.\build_installer.ps1
+# 3. 产物在 output/ 目录
+```
+
+需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)（构建脚本会自动安装）。
+
+构建完成后，在 GitHub 创建 Release 并上传 EXE 文件即可。
 
 ## 技术栈
 
