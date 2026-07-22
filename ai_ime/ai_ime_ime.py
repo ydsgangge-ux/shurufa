@@ -100,6 +100,10 @@ class AIIMEService(TextService):
         self._ai_predictor = get_predictor()
         self._ai_suggestions = []  # AI 预缓存的建议词（上屏后计算好的）
         self._ai_appended = False  # AI 结果是否已追加到候选
+        # V键符号面板（智能ABC风格：v1-v9）
+        self._v_panel = None       # 当前 V 面板 key（如 "v1"）
+        self._v_panel_syms = []    # 当前面板的符号列表
+        self._v_panel_page = 0    # 面板翻页
         # 词序续写（bigram + AI 兜底）
         self._last_committed_word = None  # 上一个上屏的词（用于 bigram 链）
         self._bigram_hint = []            # bigram 续写候选 [(word, count), ...]
@@ -238,6 +242,74 @@ class AIIMEService(TextService):
             return False
 
         # ===== 以下为中文模式 =====
+
+        # ===== V键符号面板模式拦截 =====
+        if self._v_panel:
+            # ESC：退出面板
+            if code == VK_ESCAPE:
+                self._v_panel = None
+                self._clear_composition()
+                return True
+            # 回车：退出面板，保留composition
+            if code == VK_RETURN:
+                self._v_panel = None
+                self._clear_composition()
+                return True
+            # 退格：退出面板，退回上一字符
+            if code == VK_BACK:
+                self._v_panel = None
+                if self.composition:
+                    self.composition = self.composition[:-1]
+                    if self.composition:
+                        self._update_composition_display()
+                    else:
+                        self._clear_composition()
+                return True
+            # 翻页：- 上一页，= 下一页
+            if code == config.VK_OEM_MINUS:
+                if self._v_panel_page > 0:
+                    self._v_panel_page -= 1
+                    self._show_v_panel()
+                return True
+            if code == config.VK_OEM_PLUS:
+                total_pages = (len(self._v_panel_syms) + config.PAGE_SIZE - 1) // config.PAGE_SIZE
+                if self._v_panel_page < total_pages - 1:
+                    self._v_panel_page += 1
+                    self._show_v_panel()
+                return True
+            # 空格：上屏当前页第一个符号
+            if code == VK_SPACE:
+                page_size = config.PAGE_SIZE
+                start = self._v_panel_page * page_size
+                page_syms = self._v_panel_syms[start:start + page_size]
+                if page_syms:
+                    self.setCommitString(page_syms[0])
+                    self._v_panel = None
+                    self._clear_composition()
+                return True
+            # 数字键 1-9：选择当前页对应位置的符号上屏
+            if 0x31 <= code <= 0x39:
+                idx = code - 0x31
+                page_size = config.PAGE_SIZE
+                start = self._v_panel_page * page_size
+                page_syms = self._v_panel_syms[start:start + page_size]
+                if idx < len(page_syms):
+                    self.setCommitString(page_syms[idx])
+                    self._v_panel = None
+                    self._clear_composition()
+                return True
+            # 数字键 0：选择当前页第10个符号
+            if code == 0x30:
+                page_size = config.PAGE_SIZE
+                start = self._v_panel_page * page_size
+                page_syms = self._v_panel_syms[start:start + page_size]
+                if len(page_syms) >= 10:
+                    self.setCommitString(page_syms[9])
+                    self._v_panel = None
+                    self._clear_composition()
+                return True
+            # 其他按键：退出面板，继续正常处理
+            self._v_panel = None
 
         # ESC：取消全部
         if code == VK_ESCAPE:
@@ -465,6 +537,22 @@ class AIIMEService(TextService):
         self._can_enter_seg_mode = False
         self._seg_candidates_added = False
 
+    def _show_v_panel(self):
+        """显示 V 键符号面板的当前页"""
+        if not self._v_panel_syms:
+            self.setShowCandidates(False)
+            return
+        page_size = config.PAGE_SIZE
+        start = self._v_panel_page * page_size
+        page_syms = self._v_panel_syms[start:start + page_size]
+        total_pages = (len(self._v_panel_syms) + page_size - 1) // page_size
+        self.setCandidateList(page_syms)
+        self.setCandidateCursor(0)
+        self.setShowCandidates(True)
+        # 在 composition 显示面板信息
+        page_info = " {}/{}".format(self._v_panel_page + 1, total_pages) if total_pages > 1 else ""
+        self.setCompositionString(self._v_panel + page_info)
+
     def _current_page_items(self):
         if not self._all_candidates:
             return []
@@ -485,6 +573,17 @@ class AIIMEService(TextService):
         # 重置分词模式状态
         self._seg_mode = False
         self._ai_appended = False
+
+        # V键符号面板检测（v1-v9）
+        if self.composition in config.V_PANELS:
+            self._v_panel = self.composition
+            self._v_panel_syms = config.V_PANELS[self.composition]
+            self._v_panel_page = 0
+            self._show_v_panel()
+            return
+
+        # 如果后续输入让 v1-v9 变成更长的拼音（如 v1a），退出面板模式
+        self._v_panel = None
 
         # 生成整句候选（多种解释）
         interpretations = generate_interpretations(
@@ -1092,4 +1191,7 @@ class AIIMEService(TextService):
         self.composition = ""
         self.setCompositionString("")
         self.setShowCandidates(False)
+        self._v_panel = None
+        self._v_panel_syms = []
+        self._v_panel_page = 0
         self._reset_seg_state()
