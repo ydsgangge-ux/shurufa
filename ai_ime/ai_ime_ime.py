@@ -403,6 +403,13 @@ class AIIMEService(TextService):
                 self._last_committed_word = None  # 原始拼音上屏，断链
             return True
 
+        # 数字键 1-9：V面板前缀检测（v1-v9应追加数字而非选词）
+        if 0x31 <= code <= 0x39 and self.composition == "v":
+            digit = chr(code)
+            self.composition += digit
+            self._update_composition_display()
+            return True
+
         # 数字键 1-9：分段模式选当前段候选，普通模式选候选
         if 0x31 <= code <= 0x39:
             idx = code - 0x31
