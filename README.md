@@ -66,6 +66,8 @@ mkdir "$env:USERPROFILE\.ai_ime"
 
 支持任何 OpenAI 兼容 API（DeepSeek、OpenAI、硅基流动等）。
 
+**支持 Qwen3/3.5 模型：** 自动关闭思考模式（`/no_think`），避免思考过程消耗 token 导致输出为空。
+
 ### 可选：本地 AI
 
 无需网络，但需要下载模型（约 400MB）：
@@ -92,6 +94,28 @@ mkdir "$env:USERPROFILE\.ai_ime"
 - `tinyllama-1.1b-chat-q4_k_m.gguf`
 
 放到 `models/` 目录即可，多个模型时自动选择最佳。
+
+### 可选：搜狗词库导入
+
+导入搜狗输入法的专业词库，大幅提升专业词汇输入体验：
+
+1. 前往 [搜狗词库](https://pinyin.sogou.com/dict/) 下载需要的 `.scel` 词库文件
+2. 导入词库：
+
+```powershell
+# 导入单个词库
+python import_sogou_dict.py "C:\Downloads\计算机词汇.scel"
+
+# 或批量导入整个目录
+python import_sogou_dict.py "C:\Downloads\sogou_dicts"
+
+# 合并到基础词库（生效）
+python import_sogou_dict.py --merge
+```
+
+3. 重启输入法即可使用新词
+
+支持所有搜狗 `.scel` 格式词库，包括：专业术语、行业词汇、方言词库等。
 
 ## 使用方法
 
@@ -146,6 +170,7 @@ ai_ime/
     └── base_dict.txt      # 基础词库（36.8万条）
 
 local_llm_server.py        # 本地 LLM HTTP 服务
+import_sogou_dict.py       # 搜狗词库导入工具
 install.ps1                # 一键安装
 deploy_v10.ps1             # 开发部署
 download_model.ps1         # 下载 AI 模型
