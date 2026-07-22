@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# 大文件 - 模型（需单独下载）
+models/*.gguf
+
+# 用户数据（运行时生成）
+ai_ime/data/user_memory.json
+
+# API 密钥
+api_config.json
+.ai_ime/
+
+# 备份
+*.bak
+backups/
+
+# IDE
+.vscode/
+.idea/
+
+# 临时
+*.tmp
+*.temp
+*.log
+
+# 构建产物
+output/
+pime_runtime/
+
+# 旧部署脚本
+deploy_v0[1-9]*.ps1
+deploy_v08[1-3].ps1
+deploy_v09[1-4].ps1
+fix_deploy*.ps1
+cleanup_*.ps1
+
+# 旧字典生成脚本
+gen_dict_v0[3-5].py
+
+# 旧测试脚本
+test_v0*.py
+test_perf.py
+
+# Phase0 验证文件
+phase0/
+
+# Trae AI 工作目录
+.trae/
+
+# 注册日志
+register_full_log.txt
+
+# 旧开发文档
+AI输入法_开发文档.txt
