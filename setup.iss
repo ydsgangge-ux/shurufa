@@ -6,7 +6,7 @@
 ;   2. 运行 .\build_installer.ps1        （编译安装包）
 
 #define MyAppName "AI IME"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "AI-IME"
 
 [Setup]
@@ -16,7 +16,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL=https://github.com/ai-ime/ai-ime
 DefaultDirName={commonpf}\AI_IME
 DefaultGroupName=AI IME
-OutputBaseFilename=AI_IME_Setup_v1.1.0
+OutputBaseFilename=AI_IME_Setup_v1.2.0
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMANumBlockThreads=4
@@ -143,6 +143,16 @@ Source: "download_model.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- 搜狗词库导入工具 ---
 Source: "import_sogou_dict.py"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- AI 扩词库工具 ---
+Source: "expand_lexicon.py"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- 重启输入法脚本 ---
+Source: "restart_ime.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "restart_ime.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- 使用说明 ---
+Source: "使用说明.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Local LLM server ---
 Source: "local_llm_server.py"; DestDir: "{app}\python\input_methods\ai_ime"; Flags: ignoreversion
