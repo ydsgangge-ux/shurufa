@@ -233,11 +233,16 @@ def _generate_by_llm(domain, existing, n=200):
     Returns:
         [(pinyin, word, freq), ...]
     """
-    # 确保 ai_ime 包可导入（从项目根目录或脚本所在目录）
+    # 确保 ai_ime 包可导入（适配开发目录和安装目录两种布局）
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    ai_ime_dir = os.path.join(script_dir, "ai_ime")
-    if ai_ime_dir not in sys.path:
-        sys.path.insert(0, ai_ime_dir)
+    candidates = [
+        os.path.join(script_dir, "ai_ime"),                              # 开发目录
+        os.path.join(script_dir, "python", "input_methods", "ai_ime"),    # 安装目录
+    ]
+    for d in candidates:
+        if os.path.isdir(d) and d not in sys.path:
+            sys.path.insert(0, d)
+            break
     from ai.cloud_client import get_cloud_client
 
     cloud = get_cloud_client()

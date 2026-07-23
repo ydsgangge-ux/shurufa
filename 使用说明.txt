@@ -36,7 +36,15 @@ AI IME 输入法 - 使用说明 v1.2.0
 
 四、AI 扩词库（大模型生成领域词汇）
 ---------------------------------
-使用 expand_lexicon.py 扩展专业领域词汇：
+
+【推荐】一键启动方式：
+  双击 expand_lexicon_launcher.bat
+  → 出现菜单，按数字/字母选择领域，自动扩词+重启
+
+【命令行方式】（需先打开终端）：
+  打开终端方法：
+    1. 在安装目录按住 Shift + 右键 → 选择"在此处打开 PowerShell"
+    2. 或：开始菜单 → Windows PowerShell → cd 到安装目录
 
   python expand_lexicon.py it         # IT/计算机领域
   python expand_lexicon.py 医学       # 医学领域

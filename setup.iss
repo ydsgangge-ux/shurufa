@@ -146,6 +146,8 @@ Source: "import_sogou_dict.py"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- AI 扩词库工具 ---
 Source: "expand_lexicon.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "expand_lexicon_launcher.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "expand_lexicon_launcher.py"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- 重启输入法脚本 ---
 Source: "restart_ime.bat"; DestDir: "{app}"; Flags: ignoreversion
