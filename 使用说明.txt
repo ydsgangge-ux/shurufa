@@ -37,14 +37,14 @@ AI IME 输入法 - 使用说明 v1.2.0
 四、AI 扩词库（大模型生成领域词汇）
 ---------------------------------
 
-【推荐】一键启动方式：
-  双击 expand_lexicon_launcher.bat
-  → 出现菜单，按数字/字母选择领域，自动扩词+重启
+【一键启动】：
+  鼠标右键 expand_lexicon_launcher.bat → 以管理员身份运行
+  → 出现菜单，按数字/字母选择领域，自动扩词+重启输入法
 
-【命令行方式】（需先打开终端）：
+【命令行方式】（需以管理员身份打开终端）：
   打开终端方法：
-    1. 在安装目录按住 Shift + 右键 → 选择"在此处打开 PowerShell"
-    2. 或：开始菜单 → Windows PowerShell → cd 到安装目录
+    开始菜单 → Windows PowerShell → 右键"以管理员身份运行"
+    然后 cd 到安装目录，例如：cd "D:\Program Files (x86)\AI_IME"
 
   python expand_lexicon.py it         # IT/计算机领域
   python expand_lexicon.py 医学       # 医学领域
@@ -69,7 +69,9 @@ THUOCL词库文件请从 http://thuocl.thunlp.org/ 下载，
 -------------
 修改词库或配置后，需要重启输入法生效：
 
-  restart_ime.bat    (双击运行)
+  鼠标右键 restart_ime.bat → 以管理员身份运行
+
+  （必须以管理员身份运行，否则无法杀掉 Program Files 下的进程）
 
 七、大模型与API配置
 ------------------

@@ -192,6 +192,9 @@ Root: HKLM; Subkey: "SOFTWARE\WOW6432Node\Microsoft\CTF\TIP\{{35F67E9D-A54D-4177
 Root: HKCU; Subkey: "SOFTWARE\Microsoft\CTF\TIP\{{35F67E9D-A54D-4177-9697-8B0AB71A9E04}\LanguageProfile\0x00000804\{{1FC8E29E-09F2-4E3E-A414-8FF3D4EFE3DD}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Microsoft\CTF\TIP\{{35F67E9D-A54D-4177-9697-8B0AB71A9E04}\LanguageProfile\0x00000804\{{1FC8E29E-09F2-4E3E-A414-8FF3D4EFE3DD}"; ValueType: dword; ValueName: "Enable"; ValueData: "1"; Flags: uninsdeletevalue
 
+; --- 开机自启动 PIMELauncher（确保重启电脑后输入法可用） ---
+Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AI_IME_Launcher"; ValueData: """{app}\PIMELauncher.exe"""; Flags: uninsdeletevalue
+
 ; ================================================================
 ; 注册 TSF + 启动服务
 ; ================================================================
